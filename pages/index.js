@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { useSession, signIn, signOut } from 'next-auth/react';
 import { Bricolage_Grotesque, Public_Sans } from 'next/font/google';
+import UploadDropzone from '../components/UploadDropzone';
 
 const display = Bricolage_Grotesque({
   subsets: ['latin'],
@@ -13,30 +15,45 @@ const body = Public_Sans({
   variable: '--font-public-sans',
 });
 
-const MIN_CHARS = 200;
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function Home() {
-  const [resumeText, setResumeText] = useState('');
+  const { data: session, status: sessionStatus } = useSession();
+  const [file, setFile] = useState(null);
+  const [fileError, setFileError] = useState('');
   const [status, setStatus] = useState('idle'); // idle | loading | done | error
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const charCount = resumeText.length;
-  const isValid = charCount >= MIN_CHARS;
   const isLoading = status === 'loading';
+
+  function handleFileSelect(selected) {
+    setFile(selected);
+    setFileError('');
+    setStatus('idle');
+    setResult(null);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!isValid || isLoading) return;
+    if (!file || isLoading) return;
 
     setStatus('loading');
     setResult(null);
 
     try {
+      const fileBase64 = await fileToBase64(file);
       const res = await fetch('/api/roast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ resumeText }),
+        body: JSON.stringify({ fileBase64, filename: file.name }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'roast failed');
@@ -53,44 +70,52 @@ export default function Home() {
       className={`${display.variable} ${body.variable} min-h-screen bg-ink font-sans text-paper`}
     >
       <div className="mx-auto max-w-2xl px-6 py-20 sm:py-28">
-        <p className="text-sm font-medium tracking-wide text-emberdim">
+        <div className="flex justify-end">
+          {sessionStatus === 'authenticated' ? (
+            <button
+              onClick={() => signOut()}
+              className="text-sm text-fog transition-colors hover:text-paper"
+            >
+              {session.user?.email} · Sign out
+            </button>
+          ) : (
+            <button
+              onClick={() => signIn('google')}
+              className="text-sm text-fog transition-colors hover:text-paper"
+            >
+              Sign in with Google
+            </button>
+          )}
+        </div>
+
+        <p className="mt-6 text-sm font-medium tracking-wide text-emberdim">
           For anyone about to hit &ldquo;apply&rdquo;
         </p>
         <h1 className="mt-3 font-display text-5xl font-extrabold leading-[1.05] tracking-tight sm:text-6xl">
           AI Resume Roaster
         </h1>
         <p className="mt-5 max-w-md text-lg text-fog">
-          Paste your resume. We&rsquo;ll tell you what a hiring manager would
+          Upload your resume. We&rsquo;ll tell you what a hiring manager would
           actually think, before they do.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-12">
-          <label htmlFor="resume" className="mb-2 block text-sm font-medium text-fog">
-            Your resume
-          </label>
-          <textarea
-            id="resume"
-            value={resumeText}
-            onChange={(e) => setResumeText(e.target.value)}
-            placeholder="Paste the whole thing, we can take it."
-            rows={12}
-            className="w-full resize-y rounded-lg border border-surface2 bg-surface p-4 text-paper placeholder:text-fog/50 focus:border-ember focus:outline-none focus:ring-1 focus:ring-ember"
+          <UploadDropzone
+            file={file}
+            onFileSelect={handleFileSelect}
+            onError={setFileError}
+            disabled={isLoading}
           />
 
-          <div className="mt-2 flex items-center justify-between">
-            <span
-              aria-live="polite"
-              className={`text-sm ${isValid ? 'text-ember' : 'text-fog'}`}
-            >
-              {isValid
-                ? `${charCount} characters — ready to roast`
-                : `${MIN_CHARS - charCount} more characters to go`}
-            </span>
-          </div>
+          {fileError && (
+            <p role="alert" className="mt-2 text-sm text-emberdim">
+              {fileError}
+            </p>
+          )}
 
           <button
             type="submit"
-            disabled={!isValid || isLoading}
+            disabled={!file || isLoading}
             aria-busy={isLoading}
             className="mt-6 inline-flex items-center gap-2 rounded-lg bg-ember px-6 py-3 font-display font-bold text-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >

@@ -1,6 +1,17 @@
-// Demo Prisma schema
-// Replace with your actual schema
-model Demo {
-  id    Int    @id @default(autoincrement())
-  name  String
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Roast {
+  id         String   @id @default(cuid())
+  userId     String?
+  resumeText String   @db.Text
+  feedback   Json
+  createdAt  DateTime @default(now())
 }
