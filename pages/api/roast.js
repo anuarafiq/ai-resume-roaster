@@ -7,10 +7,20 @@ import { db } from '../../lib/db';
 const MIN_CHARS = 200;
 const MAX_CHARS = 20000;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const RATE_LIMIT_MAX = 5;
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 export const config = {
   api: { bodyParser: { sizeLimit: '8mb' } },
 };
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress ?? null;
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -29,6 +39,21 @@ export default async function handler(req, res) {
 
   if (buffer.length > MAX_FILE_BYTES) {
     return res.status(400).json({ error: 'PDF must be under 5MB' });
+  }
+
+  const session = await getServerSession(req, res, authOptions);
+  const userId = session?.user?.email ?? null;
+  const ip = getClientIp(req);
+
+  // Checked before the paid Groq call so abusive requests don't cost anything.
+  const recentCount = await db.roast.count({
+    where: {
+      createdAt: { gte: new Date(Date.now() - RATE_LIMIT_WINDOW_MS) },
+      OR: userId ? [{ userId }, { ip }] : [{ ip }],
+    },
+  });
+  if (recentCount >= RATE_LIMIT_MAX) {
+    return res.status(429).json({ error: `Max ${RATE_LIMIT_MAX} roasts per hour. Try again later.` });
   }
 
   let resumeText;
@@ -50,10 +75,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: `Extracted text must be under ${MAX_CHARS} characters` });
   }
 
-  if (!process.env.GROQ_API_KEY) {
-    return res.status(500).json({ error: 'Server is missing GROQ_API_KEY' });
-  }
-
   let feedback;
   try {
     feedback = await roastResume(resumeText);
@@ -63,12 +84,10 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: message });
   }
 
-  const session = await getServerSession(req, res, authOptions);
-
   let id = null;
   try {
     const roast = await db.roast.create({
-      data: { resumeText, feedback, userId: session?.user?.email ?? null },
+      data: { resumeText, feedback, userId, ip },
     });
     id = roast.id;
   } catch (err) {

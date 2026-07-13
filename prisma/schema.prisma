@@ -11,7 +11,11 @@ datasource db {
 model Roast {
   id         String   @id @default(cuid())
   userId     String?
+  ip         String?
   resumeText String   @db.Text
   feedback   Json
   createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([ip, createdAt])
 }
